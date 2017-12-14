@@ -290,6 +290,7 @@ struct dwc3_msm {
 	struct notifier_block	dwc3_cpu_notifier;
 	struct notifier_block	usbdev_nb;
 	bool			hc_died;
+	bool			host_only_mode;
 
 	int  pwr_event_irq;
 	atomic_t                in_p3;
@@ -3820,8 +3821,8 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 
 	if (!dwc->is_drd && host_mode) {
 		dev_dbg(&pdev->dev, "DWC3 in host only mode\n");
-		mdwc->id_state = DWC3_ID_FLOAT;
-		mdwc->usb_otg_status = POWER_SUPPLY_USB_OTG_DISABLE;
+		mdwc->host_only_mode = true;
+		mdwc->id_state = DWC3_ID_GROUND;
 		dwc3_ext_event_notify(mdwc);
 	} else if (mdwc->pmic_id_irq <= 0 &&
 		of_property_read_bool(node, "psy,type-c")) {
@@ -4119,8 +4120,9 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 		mdwc->in_host_mode = false;
 
 		/* re-init core and OTG registers as block reset clears these */
-		if (dwc->dr_mode != USB_DR_MODE_HOST)
+		if (!mdwc->host_only_mode)
 			dwc3_post_host_reset_core_init(dwc);
+
 		pm_runtime_mark_last_busy(mdwc->dev);
 		pm_runtime_put_sync_autosuspend(mdwc->dev);
 		dbg_event(dwc->ctrl_num, 0xFF, "StopHost psync",
@@ -4419,7 +4421,8 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 				pm_runtime_get_noresume(mdwc->dev);
 				dwc3_initialize(mdwc);
 				/* check dp/dm for SDP & runtime_put if !SDP */
-				if (mdwc->detect_dpdm_floating) {
+				if (mdwc->detect_dpdm_floating &&
+					mdwc->chg_type == DWC3_SDP_CHARGER) {
 					dwc3_check_float_lines(mdwc);
 					if (mdwc->chg_type != DWC3_SDP_CHARGER)
 						break;
